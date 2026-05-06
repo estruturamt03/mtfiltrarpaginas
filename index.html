@@ -93,15 +93,6 @@
       color: #555;
       margin: 6px 0;
     }
-    .mode-help {
-      background: #f5f5f5;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-size: 13px;
-      color: #333;
-      margin-top: 8px;
-    }
     .actions {
       margin-bottom: 10px;
     }
@@ -147,33 +138,10 @@
   <div class="controls">
     <h3>Configuración de comparación</h3>
     <div class="controls-row">
-      <label for="actionTypeSelect">¿Qué querés hacer?</label>
-      <select id="actionTypeSelect">
-        <option value="sync_profile">Cambiar/sincronizar un perfil</option>
-        <option value="cleanup">Eliminar páginas sobrantes</option>
-      </select>
-    </div>
-
-    <div class="controls-row" id="syncControls">
-      <label for="targetProfileSelect">Perfil a actualizar:</label>
-      <select id="targetProfileSelect">
-        <option value="anunciante">Cambiar anunciante</option>
-        <option value="bot">Cambiar bot</option>
-        <option value="backup">Cambiar backup</option>
-      </select>
-
-      <label for="modeSelect">Regla de comparación:</label>
-      <select id="modeSelect">
-        <option value="ab_strict">A = B (anunciante y bot iguales)</option>
-        <option value="bot_backup">Bot = Backup (operativo)</option>
-        <option value="safe_intersection">Intersección segura (mínimo riesgo)</option>
-      </select>
     </div>
     <p class="helper">
-      Con planilla: se valida primero contra planilla. Sin planilla: prioridad de
-      comparación entre anunciante y bot.
+      La planilla es opcional. Puedes comparar con 2 o 3 perfiles cargados.
     </p>
-    <div id="modeHelp" class="mode-help"></div>
   </div>
 
   <div class="actions">
@@ -193,11 +161,6 @@
       bot: [],
       backup: [],
       planilla: []
-    };
-    const modeDescriptions = {
-      ab_strict: "Compara perfiles con criterio estricto de igualdad.",
-      bot_backup: "Compara perfiles con enfoque operativo.",
-      safe_intersection: "Mantiene solo páginas en común entre listas seleccionadas."
     };
 
     function isCompanyName(line) {
@@ -330,12 +293,6 @@
       const profilesWithData = getProfilesWithData();
       const compareOutput = document.getElementById("compareOutput");
       const sheetAlertsOutput = document.getElementById("sheetAlertsOutput");
-      const actionType = document.getElementById("actionTypeSelect").value;
-      const mode = document.getElementById("modeSelect").value;
-      const targetProfile =
-        actionType === "cleanup"
-          ? "cleanup"
-          : document.getElementById("targetProfileSelect").value;
 
       if (profilesWithData.length < 2) {
         compareOutput.textContent = "Debes filtrar al menos 2 perfiles para comparar.";
@@ -351,7 +308,7 @@
       };
       const derived = buildDerivedSets(profileData);
 
-      const comparedProfiles = getComparedProfiles(mode, actionType, targetProfile);
+      const comparedProfiles = getComparedProfiles();
 
       const profilesReady = comparedProfiles.filter(
         (profile) => filteredProfiles[profile].length > 0
@@ -381,25 +338,12 @@
       sheetAlertsOutput.textContent = buildSheetAlerts(derived, profileData);
     }
 
-    function getComparedProfiles(mode, actionType, targetProfile) {
-      if (actionType === "sync_profile") {
-        const byTarget =
-          targetProfile === "bot"
-            ? ["anunciante", "backup"]
-            : targetProfile === "backup"
-              ? ["anunciante", "bot"]
-              : ["bot", "backup"];
-        if (filteredProfiles.planilla.length > 0) {
-          byTarget.push("planilla");
-        }
-        return byTarget;
-      }
-
-      if (mode === "ab_strict") {
-        return ["anunciante", "bot", ...(filteredProfiles.backup.length ? ["backup"] : [])];
-      }
-      if (mode === "bot_backup") {
-        return ["bot", "backup", ...(filteredProfiles.anunciante.length ? ["anunciante"] : [])];
+    function getComparedProfiles() {
+      const nonSheetProfiles = ["anunciante", "bot", "backup"].filter(
+        (profile) => filteredProfiles[profile].length > 0
+      );
+      if (nonSheetProfiles.length >= 2) {
+        return nonSheetProfiles;
       }
       return getProfilesWithData().map(([profile]) => profile);
     }
@@ -416,136 +360,239 @@
         missingInBackupFromAB
       } = derived;
       const lines = [];
+      const loadedPrimaryProfiles = ["anunciante", "bot", "backup"].filter(
+        (profile) => profileData[profile].set.size > 0
+      );
+      const hasThreeProfiles = loadedPrimaryProfiles.length === 3;
+      const hasTwoProfiles = loadedPrimaryProfiles.length === 2;
+      const profileLabels = {
+        anunciante: "anunciante",
+        bot: "bot",
+        backup: "backup"
+      };
+
+      const addMissingBetweenTwoProfiles = () => {
+        const [p1, p2] = loadedPrimaryProfiles;
+        const p1Set = profileData[p1].set;
+        const p2Set = profileData[p2].set;
+        const missingInP1 = difference(p2Set, p1Set);
+        const missingInP2 = difference(p1Set, p2Set);
+
+        lines.push(`Faltan en ${profileLabels[p1]} (están en ${profileLabels[p2]} y no en ${profileLabels[p1]}):`);
+        lines.push(
+          ...(missingInP1.length
+            ? toDisplayList(missingInP1, p2, profileData).map((item) => `- ${item}`)
+            : ["- (ninguna)"])
+        );
+        lines.push("");
+        lines.push(`Faltan en ${profileLabels[p2]} (están en ${profileLabels[p1]} y no en ${profileLabels[p2]}):`);
+        lines.push(
+          ...(missingInP2.length
+            ? toDisplayList(missingInP2, p1, profileData).map((item) => `- ${item}`)
+            : ["- (ninguna)"])
+        );
+      };
 
       if (!planillaSet.size) {
-        lines.push("Planilla no cargada: se usan solo perfiles para comparar.");
-        lines.push("Sugerencia: cargar planilla para validar altas y desvíos.");
-        return lines.join("\n");
-      }
-
-      lines.push("Prioridad alta - faltan en planilla (presentes en los 3 perfiles):");
-      lines.push(
-        ...(missingInSheetFromABC.size
-          ? toDisplayList([...missingInSheetFromABC], "anunciante", profileData).map(
-              (item) => `- ${item}`
-            )
-          : ["- (ninguna)"])
-      );
-      lines.push("");
-      lines.push("Prioridad media - en anunciante+bot pero falta validar planilla/backup:");
-      const mediumKeys = [...missingInSheetFromAB];
-      if (!mediumKeys.length && !missingInBackupFromAB.size) {
-        lines.push("- (ninguna)");
+        lines.push("Planilla no cargada: alertas de planilla desactivadas.");
+        lines.push("Puedes comparar normalmente entre perfiles cargados.");
+        lines.push("");
+        if (hasTwoProfiles) {
+          lines.push("Control entre perfiles (sin planilla):");
+          addMissingBetweenTwoProfiles();
+        } else {
+          lines.push("Control entre perfiles (sin planilla):");
+          lines.push(`En común anunciante + bot: ${derived.commonAB.size}`);
+          lines.push(
+            ...(derived.commonAB.size
+              ? toDisplayList([...derived.commonAB], "anunciante", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+          lines.push("");
+          lines.push("Faltan en backup respecto a anunciante + bot:");
+          lines.push(
+            ...(missingInBackupFromAB.size
+              ? toDisplayList([...missingInBackupFromAB], "anunciante", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+        }
       } else {
-        mediumKeys.forEach((key) => {
-          const display = getDisplayName("anunciante", key, profileData);
-          const missingBackup = missingInBackupFromAB.has(key) ? " | falta en backup" : "";
-          lines.push(`- ${display}${missingBackup}`);
-        });
-        difference(derived.commonAB, derived.planillaSet)
-          .filter((key) => !missingInSheetFromAB.has(key))
-          .forEach((key) => {
-            const display = getDisplayName("anunciante", key, profileData);
-            lines.push(`- ${display}`);
-          });
+        if (hasThreeProfiles) {
+          lines.push("Prioridad alta - faltan en planilla (presentes en los 3 perfiles):");
+          lines.push(
+            ...(missingInSheetFromABC.size
+              ? toDisplayList([...missingInSheetFromABC], "anunciante", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+          lines.push("");
+          lines.push("Prioridad media - en anunciante+bot pero falta validar planilla/backup:");
+          const mediumKeys = [...missingInSheetFromAB];
+          if (!mediumKeys.length && !missingInBackupFromAB.size) {
+            lines.push("- (ninguna)");
+          } else {
+            mediumKeys.forEach((key) => {
+              const display = getDisplayName("anunciante", key, profileData);
+              const missingBackup = missingInBackupFromAB.has(key) ? " | falta en backup" : "";
+              lines.push(`- ${display}${missingBackup}`);
+            });
+            difference(derived.commonAB, derived.planillaSet)
+              .filter((key) => !missingInSheetFromAB.has(key))
+              .forEach((key) => {
+                const display = getDisplayName("anunciante", key, profileData);
+                lines.push(`- ${display}`);
+              });
+          }
+          lines.push("");
+          lines.push("Acción recomendada:");
+          lines.push("- Revisar si la página pertenece a otro proyecto.");
+          lines.push("- Si corresponde, agregar a planilla.");
+          lines.push("- Sincronizar el perfil faltante cuando aplique.");
+        } else {
+          const [p1, p2] = loadedPrimaryProfiles;
+          const commonTwo = new Set(intersection(profileData[p1].set, profileData[p2].set));
+          const missingInSheetFromCommonTwo = difference(commonTwo, planillaSet);
+          lines.push(`Faltan en planilla (en común entre ${profileLabels[p1]} y ${profileLabels[p2]}):`);
+          lines.push(
+            ...(missingInSheetFromCommonTwo.length
+              ? toDisplayList(missingInSheetFromCommonTwo, p1, profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+          lines.push("");
+          lines.push(`Comparación ${profileLabels[p1]} vs planilla:`);
+          const missingInP1FromSheet = difference(planillaSet, profileData[p1].set);
+          const extraInP1FromSheet = difference(profileData[p1].set, planillaSet);
+          lines.push(`Faltan en ${profileLabels[p1]}:`);
+          lines.push(
+            ...(missingInP1FromSheet.length
+              ? toDisplayList(missingInP1FromSheet, "planilla", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+          lines.push(`Sobran en ${profileLabels[p1]}:`);
+          lines.push(
+            ...(extraInP1FromSheet.length
+              ? toDisplayList(extraInP1FromSheet, p1, profileData).map((item) => `- ${item}`)
+              : ["- (ninguna)"])
+          );
+          lines.push("");
+          lines.push(`Comparación ${profileLabels[p2]} vs planilla:`);
+          const missingInP2FromSheet = difference(planillaSet, profileData[p2].set);
+          const extraInP2FromSheet = difference(profileData[p2].set, planillaSet);
+          lines.push(`Faltan en ${profileLabels[p2]}:`);
+          lines.push(
+            ...(missingInP2FromSheet.length
+              ? toDisplayList(missingInP2FromSheet, "planilla", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+          lines.push(`Sobran en ${profileLabels[p2]}:`);
+          lines.push(
+            ...(extraInP2FromSheet.length
+              ? toDisplayList(extraInP2FromSheet, p2, profileData).map((item) => `- ${item}`)
+              : ["- (ninguna)"])
+          );
+        }
       }
-      lines.push("");
-      lines.push("Acción recomendada:");
-      lines.push("- Revisar si la página pertenece a otro proyecto.");
-      lines.push("- Si corresponde, agregar a planilla.");
-      lines.push("- Sincronizar el perfil faltante cuando aplique.");
-      lines.push("");
-      const sobraSoloEnAnunciante = difference(anuncianteSet, union(botSet, backupSet));
-      const sobraSoloEnBot = difference(botSet, union(anuncianteSet, backupSet));
-      const sobraSoloEnBackup = difference(backupSet, union(anuncianteSet, botSet));
+      if (hasThreeProfiles) {
+        lines.push("");
+        const sobraSoloEnAnunciante = difference(anuncianteSet, union(botSet, backupSet));
+        const sobraSoloEnBot = difference(botSet, union(anuncianteSet, backupSet));
+        const sobraSoloEnBackup = difference(backupSet, union(anuncianteSet, botSet));
 
-      lines.push("Sobran estas páginas en anunciante:");
-      lines.push(
-        ...(
-          sobraSoloEnAnunciante.length
-            ? toDisplayList(sobraSoloEnAnunciante, "anunciante", profileData).map(
-                (item) => `- ${item}`
-              )
-            : ["- (ninguna)"]
-        )
-      );
-      lines.push("");
-      lines.push("Sobran estas páginas en bot:");
-      lines.push(
-        ...(
-          sobraSoloEnBot.length
-            ? toDisplayList(sobraSoloEnBot, "bot", profileData).map(
-                (item) => `- ${item}`
-              )
-            : ["- (ninguna)"]
-        )
-      );
-      lines.push("");
-      lines.push("Sobran estas páginas en backup:");
-      lines.push(
-        ...(
-          sobraSoloEnBackup.length
-            ? toDisplayList(sobraSoloEnBackup, "backup", profileData).map(
-                (item) => `- ${item}`
-              )
-            : ["- (ninguna)"]
-        )
-      );
-      lines.push("");
-      const onlyInAnuncianteFromSheet = intersection(
-        new Set(intersection(planillaSet, anuncianteSet)),
-        new Set(difference(planillaSet, union(botSet, backupSet)))
-      );
-      const onlyInBotFromSheet = intersection(
-        new Set(intersection(planillaSet, botSet)),
-        new Set(difference(planillaSet, union(anuncianteSet, backupSet)))
-      );
-      const onlyInBackupFromSheet = intersection(
-        new Set(intersection(planillaSet, backupSet)),
-        new Set(difference(planillaSet, union(anuncianteSet, botSet)))
-      );
+        lines.push("Sobran estas páginas en anunciante:");
+        lines.push(
+          ...(
+            sobraSoloEnAnunciante.length
+              ? toDisplayList(sobraSoloEnAnunciante, "anunciante", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"]
+          )
+        );
+        lines.push("");
+        lines.push("Sobran estas páginas en bot:");
+        lines.push(
+          ...(
+            sobraSoloEnBot.length
+              ? toDisplayList(sobraSoloEnBot, "bot", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"]
+          )
+        );
+        lines.push("");
+        lines.push("Sobran estas páginas en backup:");
+        lines.push(
+          ...(
+            sobraSoloEnBackup.length
+              ? toDisplayList(sobraSoloEnBackup, "backup", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"]
+          )
+        );
 
-      lines.push("En planilla y solo en 1 perfil (faltan en los otros 2):");
-      lines.push("Solo en anunciante:");
-      lines.push(
-        ...(onlyInAnuncianteFromSheet.length
-          ? toDisplayList(onlyInAnuncianteFromSheet, "anunciante", profileData).map(
-              (item) => `- ${item}`
-            )
-          : ["- (ninguna)"])
-      );
-      lines.push("Solo en bot:");
-      lines.push(
-        ...(onlyInBotFromSheet.length
-          ? toDisplayList(onlyInBotFromSheet, "bot", profileData).map(
-              (item) => `- ${item}`
-            )
-          : ["- (ninguna)"])
-      );
-      lines.push("Solo en backup:");
-      lines.push(
-        ...(onlyInBackupFromSheet.length
-          ? toDisplayList(onlyInBackupFromSheet, "backup", profileData).map(
-              (item) => `- ${item}`
-            )
-          : ["- (ninguna)"])
-      );
+        if (planillaSet.size) {
+          lines.push("");
+          const onlyInAnuncianteFromSheet = intersection(
+            new Set(intersection(planillaSet, anuncianteSet)),
+            new Set(difference(planillaSet, union(botSet, backupSet)))
+          );
+          const onlyInBotFromSheet = intersection(
+            new Set(intersection(planillaSet, botSet)),
+            new Set(difference(planillaSet, union(anuncianteSet, backupSet)))
+          );
+          const onlyInBackupFromSheet = intersection(
+            new Set(intersection(planillaSet, backupSet)),
+            new Set(difference(planillaSet, union(anuncianteSet, botSet)))
+          );
+
+          lines.push("En planilla y solo en 1 perfil (faltan en los otros 2):");
+          lines.push("Solo en anunciante:");
+          lines.push(
+            ...(onlyInAnuncianteFromSheet.length
+              ? toDisplayList(onlyInAnuncianteFromSheet, "anunciante", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+          lines.push("Solo en bot:");
+          lines.push(
+            ...(onlyInBotFromSheet.length
+              ? toDisplayList(onlyInBotFromSheet, "bot", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+          lines.push("Solo en backup:");
+          lines.push(
+            ...(onlyInBackupFromSheet.length
+              ? toDisplayList(onlyInBackupFromSheet, "backup", profileData).map(
+                  (item) => `- ${item}`
+                )
+              : ["- (ninguna)"])
+          );
+        }
+      }
       return lines.join("\n");
     }
 
     function buildFullReport() {
-      const actionTypeText =
-        document.getElementById("actionTypeSelect").selectedOptions[0].textContent;
-      const modeText = document.getElementById("modeSelect").selectedOptions[0].textContent;
-      const targetText = document.getElementById("targetProfileSelect").selectedOptions[0].textContent;
       const compareText = document.getElementById("compareOutput").textContent || "(sin datos)";
       const sheetAlertsText =
         document.getElementById("sheetAlertsOutput").textContent || "(sin datos)";
       return [
         `Reporte de sincronización`,
-        `Acción: ${actionTypeText}`,
-        `Modo: ${modeText}`,
-        `Perfil a actualizar: ${targetText}`,
         "",
         "Coincidencias entre perfiles",
         compareText,
@@ -576,50 +623,6 @@
       URL.revokeObjectURL(url);
     }
 
-    function refreshModeHelp() {
-      const actionType = document.getElementById("actionTypeSelect").value;
-      const targetProfile = document.getElementById("targetProfileSelect").value;
-      const mode = document.getElementById("modeSelect").value;
-      const modeHelp = document.getElementById("modeHelp");
-      if (actionType === "sync_profile") {
-        if (targetProfile === "bot") {
-          modeHelp.textContent =
-            "Cambiar bot: se compara Anunciante + Backup y, si hay planilla, también se toma en cuenta.";
-          return;
-        }
-        if (targetProfile === "backup") {
-          modeHelp.textContent =
-            "Cambiar backup: se compara Anunciante + Bot y, si hay planilla, también se toma en cuenta.";
-          return;
-        }
-        modeHelp.textContent =
-          "Cambiar anunciante: se compara Bot + Backup y, si hay planilla, también se toma en cuenta.";
-        return;
-      }
-      modeHelp.textContent = modeDescriptions[mode];
-    }
-
-    function refreshControlsByAction() {
-      const actionType = document.getElementById("actionTypeSelect").value;
-      const syncControls = document.getElementById("syncControls");
-      const helper = document.querySelector(".helper");
-      const modeHelp = document.getElementById("modeHelp");
-
-      if (actionType === "cleanup") {
-        syncControls.classList.add("hidden");
-        helper.textContent =
-          "Limpieza: compara los 3 perfiles para detectar páginas sobrantes por cuenta.";
-        modeHelp.textContent =
-          "En limpieza no hace falta elegir perfil a actualizar. Se genera una lista para anunciante, bot y backup.";
-        return;
-      }
-
-      syncControls.classList.remove("hidden");
-      helper.textContent =
-        "Sincronización: elegí el perfil a actualizar. Con planilla, la planilla es referencia principal.";
-      refreshModeHelp();
-    }
-
     document.querySelectorAll(".filter-profile").forEach((button) => {
       button.addEventListener("click", () => {
         filterProfile(button.dataset.profile);
@@ -627,18 +630,10 @@
     });
 
     document.getElementById("compareBtn").addEventListener("click", compareProfiles);
-    document
-      .getElementById("actionTypeSelect")
-      .addEventListener("change", refreshControlsByAction);
-    document
-      .getElementById("targetProfileSelect")
-      .addEventListener("change", refreshModeHelp);
-    document.getElementById("modeSelect").addEventListener("change", refreshModeHelp);
     document.getElementById("copyReportBtn").addEventListener("click", copyReport);
     document
       .getElementById("downloadReportBtn")
       .addEventListener("click", downloadReport);
-    refreshControlsByAction();
   </script>
 </body>
 </html>
