@@ -6,11 +6,13 @@
   <title>Sincronización de perfiles y planilla</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: "Segoe UI", Arial, sans-serif;
       max-width: 980px;
       margin: 24px auto;
       padding: 0 16px;
       line-height: 1.4;
+      background: #f7f8fb;
+      color: #1f2937;
     }
     h1 {
       margin-bottom: 8px;
@@ -26,13 +28,15 @@
       margin-bottom: 18px;
     }
     .card {
-      border: 1px solid #ddd;
-      padding: 10px;
-      border-radius: 8px;
-      background: #fafafa;
+      border: 1px solid #e5e7eb;
+      padding: 12px;
+      border-radius: 10px;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
     }
     .card h3 {
       margin: 0 0 8px;
+      font-size: 16px;
     }
     textarea {
       width: 100%;
@@ -41,6 +45,9 @@
       font-size: 14px;
       box-sizing: border-box;
       margin-bottom: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fcfcfd;
     }
     button {
       padding: 10px 14px;
@@ -48,24 +55,39 @@
       cursor: pointer;
       margin-right: 8px;
       margin-bottom: 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    button:hover {
+      background: #f3f4f6;
     }
     pre {
-      background: #f5f5f5;
-      border: 1px solid #ddd;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
       padding: 12px;
       white-space: pre-wrap;
       min-height: 70px;
       margin: 0;
+      border-radius: 8px;
+    }
+    .compact-output {
+      min-height: 160px;
+      max-height: 160px;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .section-title {
-      margin: 10px 0 8px;
+      margin: 14px 0 8px;
+      font-size: 18px;
     }
     .controls {
-      border: 1px solid #ddd;
-      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
       padding: 12px;
       margin-bottom: 14px;
-      background: #fff;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
     }
     .controls h3 {
       margin: 0 0 10px;
@@ -84,6 +106,16 @@
     }
     .controls select {
       padding: 6px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .controls input {
+      padding: 6px 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      min-width: 240px;
     }
     .hidden {
       display: none;
@@ -95,6 +127,14 @@
     }
     .actions {
       margin-bottom: 10px;
+    }
+    #compareBtn {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+    #compareBtn:hover {
+      background: #1d4ed8;
     }
   </style>
 </head>
@@ -110,34 +150,40 @@
       <h3>Anunciante</h3>
       <textarea id="inputAnunciante" placeholder="Pega listado de anunciante..."></textarea>
       <button type="button" data-profile="anunciante" class="filter-profile">Filtrar anunciante</button>
-      <pre id="outputAnunciante"></pre>
+      <pre id="outputAnunciante" class="compact-output"></pre>
     </section>
 
     <section class="card">
       <h3>Bot</h3>
       <textarea id="inputBot" placeholder="Pega listado de bot..."></textarea>
       <button type="button" data-profile="bot" class="filter-profile">Filtrar bot</button>
-      <pre id="outputBot"></pre>
+      <pre id="outputBot" class="compact-output"></pre>
     </section>
 
     <section class="card">
       <h3>Backup</h3>
       <textarea id="inputBackup" placeholder="Pega listado de backup..."></textarea>
       <button type="button" data-profile="backup" class="filter-profile">Filtrar backup</button>
-      <pre id="outputBackup"></pre>
+      <pre id="outputBackup" class="compact-output"></pre>
     </section>
 
     <section class="card">
       <h3>Planilla</h3>
       <textarea id="inputPlanilla" placeholder="Pega listado de planilla..."></textarea>
       <button type="button" data-profile="planilla" class="filter-profile">Filtrar planilla</button>
-      <pre id="outputPlanilla"></pre>
+      <pre id="outputPlanilla" class="compact-output"></pre>
     </section>
   </div>
 
   <div class="controls">
     <h3>Configuración de comparación</h3>
     <div class="controls-row">
+      <label for="projectNameInput">Nombre del proyecto:</label>
+      <input
+        id="projectNameInput"
+        type="text"
+        placeholder="Ej: JPCMMT"
+      />
     </div>
     <p class="helper">
       La planilla es opcional. Puedes comparar con 2 o 3 perfiles cargados.
@@ -233,6 +279,12 @@
       renderProfileResult(profile, names);
     }
 
+    function filterAllProfiles() {
+      ["anunciante", "bot", "backup", "planilla"].forEach((profile) => {
+        filterProfile(profile);
+      });
+    }
+
     function getProfilesWithData() {
       return Object.entries(filteredProfiles).filter(([, names]) => names.length > 0);
     }
@@ -290,6 +342,8 @@
     }
 
     function compareProfiles() {
+      filterAllProfiles();
+
       const profilesWithData = getProfilesWithData();
       const compareOutput = document.getElementById("compareOutput");
       const sheetAlertsOutput = document.getElementById("sheetAlertsOutput");
@@ -335,7 +389,7 @@
         compareOutput.textContent = lines.join("\n");
       }
 
-      sheetAlertsOutput.textContent = buildSheetAlerts(derived, profileData);
+      sheetAlertsOutput.innerHTML = formatWithBoldTitles(buildSheetAlerts(derived, profileData));
     }
 
     function getComparedProfiles() {
@@ -381,15 +435,15 @@
         lines.push(`Faltan en ${profileLabels[p1]} (están en ${profileLabels[p2]} y no en ${profileLabels[p1]}):`);
         lines.push(
           ...(missingInP1.length
-            ? toDisplayList(missingInP1, p2, profileData).map((item) => `- ${item}`)
-            : ["- (ninguna)"])
+            ? toDisplayList(missingInP1, p2, profileData).map((item) => item)
+            : ["(ninguna)"])
         );
         lines.push("");
         lines.push(`Faltan en ${profileLabels[p2]} (están en ${profileLabels[p1]} y no en ${profileLabels[p2]}):`);
         lines.push(
           ...(missingInP2.length
-            ? toDisplayList(missingInP2, p1, profileData).map((item) => `- ${item}`)
-            : ["- (ninguna)"])
+            ? toDisplayList(missingInP2, p1, profileData).map((item) => item)
+            : ["(ninguna)"])
         );
       };
 
@@ -406,18 +460,18 @@
           lines.push(
             ...(derived.commonAB.size
               ? toDisplayList([...derived.commonAB], "anunciante", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
           lines.push("");
           lines.push("Faltan en backup respecto a anunciante + bot:");
           lines.push(
             ...(missingInBackupFromAB.size
               ? toDisplayList([...missingInBackupFromAB], "anunciante", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
         }
       } else {
@@ -425,27 +479,27 @@
           lines.push("Prioridad alta - faltan en planilla (presentes en los 3 perfiles):");
           lines.push(
             ...(missingInSheetFromABC.size
-              ? toDisplayList([...missingInSheetFromABC], "anunciante", profileData).map(
-                  (item) => `- ${item}`
-                )
-              : ["- (ninguna)"])
+            ? toDisplayList([...missingInSheetFromABC], "anunciante", profileData).map(
+                (item) => item
+              )
+            : ["(ninguna)"])
           );
           lines.push("");
-          lines.push("Prioridad media - en anunciante+bot pero falta validar planilla/backup:");
+          lines.push("Prioridad media - está en anunciante y bot, falta validar en planilla y/o backup:");
           const mediumKeys = [...missingInSheetFromAB];
           if (!mediumKeys.length && !missingInBackupFromAB.size) {
-            lines.push("- (ninguna)");
+            lines.push("(ninguna)");
           } else {
             mediumKeys.forEach((key) => {
               const display = getDisplayName("anunciante", key, profileData);
               const missingBackup = missingInBackupFromAB.has(key) ? " | falta en backup" : "";
-              lines.push(`- ${display}${missingBackup}`);
+              lines.push(`${display}${missingBackup}`);
             });
             difference(derived.commonAB, derived.planillaSet)
               .filter((key) => !missingInSheetFromAB.has(key))
               .forEach((key) => {
                 const display = getDisplayName("anunciante", key, profileData);
-                lines.push(`- ${display}`);
+                lines.push(display);
               });
           }
           lines.push("");
@@ -461,9 +515,9 @@
           lines.push(
             ...(missingInSheetFromCommonTwo.length
               ? toDisplayList(missingInSheetFromCommonTwo, p1, profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
           lines.push("");
           lines.push(`Comparación ${profileLabels[p1]} vs planilla:`);
@@ -473,15 +527,15 @@
           lines.push(
             ...(missingInP1FromSheet.length
               ? toDisplayList(missingInP1FromSheet, "planilla", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
           lines.push(`Sobran en ${profileLabels[p1]}:`);
           lines.push(
             ...(extraInP1FromSheet.length
-              ? toDisplayList(extraInP1FromSheet, p1, profileData).map((item) => `- ${item}`)
-              : ["- (ninguna)"])
+              ? toDisplayList(extraInP1FromSheet, p1, profileData).map((item) => item)
+              : ["(ninguna)"])
           );
           lines.push("");
           lines.push(`Comparación ${profileLabels[p2]} vs planilla:`);
@@ -491,15 +545,15 @@
           lines.push(
             ...(missingInP2FromSheet.length
               ? toDisplayList(missingInP2FromSheet, "planilla", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
           lines.push(`Sobran en ${profileLabels[p2]}:`);
           lines.push(
             ...(extraInP2FromSheet.length
-              ? toDisplayList(extraInP2FromSheet, p2, profileData).map((item) => `- ${item}`)
-              : ["- (ninguna)"])
+              ? toDisplayList(extraInP2FromSheet, p2, profileData).map((item) => item)
+              : ["(ninguna)"])
           );
         }
       }
@@ -509,36 +563,36 @@
         const sobraSoloEnBot = difference(botSet, union(anuncianteSet, backupSet));
         const sobraSoloEnBackup = difference(backupSet, union(anuncianteSet, botSet));
 
-        lines.push("Sobran estas páginas en anunciante:");
+        lines.push(`Sobran estas páginas en anunciante: ${sobraSoloEnAnunciante.length}`);
         lines.push(
           ...(
             sobraSoloEnAnunciante.length
               ? toDisplayList(sobraSoloEnAnunciante, "anunciante", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"]
+              : ["(ninguna)"]
           )
         );
         lines.push("");
-        lines.push("Sobran estas páginas en bot:");
+        lines.push(`Sobran estas páginas en bot: ${sobraSoloEnBot.length}`);
         lines.push(
           ...(
             sobraSoloEnBot.length
               ? toDisplayList(sobraSoloEnBot, "bot", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"]
+              : ["(ninguna)"]
           )
         );
         lines.push("");
-        lines.push("Sobran estas páginas en backup:");
+        lines.push(`Sobran estas páginas en backup: ${sobraSoloEnBackup.length}`);
         lines.push(
           ...(
             sobraSoloEnBackup.length
               ? toDisplayList(sobraSoloEnBackup, "backup", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"]
+              : ["(ninguna)"]
           )
         );
 
@@ -557,30 +611,30 @@
             new Set(difference(planillaSet, union(anuncianteSet, botSet)))
           );
 
-          lines.push("En planilla y solo en 1 perfil (faltan en los otros 2):");
+          lines.push("Está en planilla y en solo 1 perfil (falta agregar en los otros 2):");
           lines.push("Solo en anunciante:");
           lines.push(
             ...(onlyInAnuncianteFromSheet.length
               ? toDisplayList(onlyInAnuncianteFromSheet, "anunciante", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
           lines.push("Solo en bot:");
           lines.push(
             ...(onlyInBotFromSheet.length
               ? toDisplayList(onlyInBotFromSheet, "bot", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
           lines.push("Solo en backup:");
           lines.push(
             ...(onlyInBackupFromSheet.length
               ? toDisplayList(onlyInBackupFromSheet, "backup", profileData).map(
-                  (item) => `- ${item}`
+                  (item) => item
                 )
-              : ["- (ninguna)"])
+              : ["(ninguna)"])
           );
         }
       }
@@ -588,11 +642,14 @@
     }
 
     function buildFullReport() {
+      const projectName =
+        document.getElementById("projectNameInput").value.trim() || "Sin nombre";
       const compareText = document.getElementById("compareOutput").textContent || "(sin datos)";
       const sheetAlertsText =
         document.getElementById("sheetAlertsOutput").textContent || "(sin datos)";
       return [
         `Reporte de sincronización`,
+        `Proyecto: ${projectName}`,
         "",
         "Coincidencias entre perfiles",
         compareText,
@@ -600,6 +657,37 @@
         "Alertas de planilla",
         sheetAlertsText
       ].join("\n");
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function formatWithBoldTitles(text) {
+      const titlePrefixes = [
+        "Prioridad alta",
+        "Prioridad media",
+        "Acción recomendada",
+        "Control entre perfiles",
+        "En común",
+        "Faltan en ",
+        "Sobran estas páginas en ",
+        "Está en planilla y en solo 1 perfil",
+        "Solo en ",
+        "Comparación "
+      ];
+
+      return text
+        .split("\n")
+        .map((line) => {
+          const escapedLine = escapeHtml(line);
+          const isTitle = titlePrefixes.some((prefix) => line.startsWith(prefix));
+          return isTitle ? `<strong>${escapedLine}</strong>` : escapedLine;
+        })
+        .join("<br>");
     }
 
     async function copyReport() {
@@ -614,11 +702,15 @@
 
     function downloadReport() {
       const report = buildFullReport();
+      const rawProjectName = document.getElementById("projectNameInput").value.trim();
+      const safeProjectName = (rawProjectName || "reporte-sincronizacion")
+        .replace(/[\\/:*?"<>|]/g, "")
+        .replace(/\s+/g, "-");
       const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "reporte-sincronizacion.txt";
+      link.download = `${safeProjectName}.txt`;
       link.click();
       URL.revokeObjectURL(url);
     }
