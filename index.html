@@ -237,8 +237,10 @@
 
     function normalizeName(name) {
       return name
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
         .replace(/\s+/g, " ")
         .trim()
         .toLowerCase();
@@ -432,14 +434,14 @@
         const missingInP1 = difference(p2Set, p1Set);
         const missingInP2 = difference(p1Set, p2Set);
 
-        lines.push(`Faltan en ${profileLabels[p1]} (están en ${profileLabels[p2]} y no en ${profileLabels[p1]}):`);
+        lines.push(`Sobran en ${profileLabels[p2]} respecto a ${profileLabels[p1]}:`);
         lines.push(
           ...(missingInP1.length
             ? toDisplayList(missingInP1, p2, profileData).map((item) => item)
             : ["(ninguna)"])
         );
         lines.push("");
-        lines.push(`Faltan en ${profileLabels[p2]} (están en ${profileLabels[p1]} y no en ${profileLabels[p2]}):`);
+        lines.push(`Sobran en ${profileLabels[p1]} respecto a ${profileLabels[p2]}:`);
         lines.push(
           ...(missingInP2.length
             ? toDisplayList(missingInP2, p1, profileData).map((item) => item)
@@ -632,6 +634,19 @@
           lines.push(
             ...(onlyInBackupFromSheet.length
               ? toDisplayList(onlyInBackupFromSheet, "backup", profileData).map(
+                  (item) => item
+                )
+              : ["(ninguna)"])
+          );
+          lines.push("");
+          const missingEverywhereFromSheet = difference(
+            planillaSet,
+            union(anuncianteSet, union(botSet, backupSet))
+          );
+          lines.push("Está en planilla pero no está en ninguno de los 3 perfiles:");
+          lines.push(
+            ...(missingEverywhereFromSheet.length
+              ? toDisplayList(missingEverywhereFromSheet, "planilla", profileData).map(
                   (item) => item
                 )
               : ["(ninguna)"])
