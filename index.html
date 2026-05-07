@@ -128,6 +128,14 @@
     .actions {
       margin-bottom: 10px;
     }
+    .pair-toolbar {
+      margin: 6px 0 12px;
+    }
+    .pair-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
     #compareBtn {
       background: #2563eb;
       color: #fff;
@@ -149,29 +157,19 @@
     <section class="card">
       <h3>Anunciante</h3>
       <textarea id="inputAnunciante" placeholder="Pega listado de anunciante..."></textarea>
-      <button type="button" data-profile="anunciante" class="filter-profile">Filtrar anunciante</button>
-      <pre id="outputAnunciante" class="compact-output"></pre>
     </section>
 
-    <section class="card">
-      <h3>Bot</h3>
-      <textarea id="inputBot" placeholder="Pega listado de bot..."></textarea>
-      <button type="button" data-profile="bot" class="filter-profile">Filtrar bot</button>
-      <pre id="outputBot" class="compact-output"></pre>
-    </section>
-
-    <section class="card">
-      <h3>Backup</h3>
-      <textarea id="inputBackup" placeholder="Pega listado de backup..."></textarea>
-      <button type="button" data-profile="backup" class="filter-profile">Filtrar backup</button>
-      <pre id="outputBackup" class="compact-output"></pre>
+    <section class="card" style="grid-column: 1 / -1;">
+      <h3>Pares Bot/Backup</h3>
+      <div class="pair-toolbar">
+        <button type="button" id="addPairBtn">+ Agregar par Bot/Backup</button>
+      </div>
+      <div id="pairsContainer"></div>
     </section>
 
     <section class="card">
       <h3>Planilla</h3>
       <textarea id="inputPlanilla" placeholder="Pega listado de planilla..."></textarea>
-      <button type="button" data-profile="planilla" class="filter-profile">Filtrar planilla</button>
-      <pre id="outputPlanilla" class="compact-output"></pre>
     </section>
   </div>
 
@@ -204,10 +202,10 @@
   <script>
     const filteredProfiles = {
       anunciante: [],
-      bot: [],
-      backup: [],
-      planilla: []
+      planilla: [],
+      pairs: []
     };
+    let pairCounter = 0;
 
     function isCompanyName(line) {
       if (!line) return false;
@@ -265,11 +263,56 @@
       };
     }
 
-    function renderProfileResult(profile, names) {
-      const output = document.getElementById(
-        `output${profile[0].toUpperCase()}${profile.slice(1)}`
+    function createPairCard(index) {
+      const pair = filteredProfiles.pairs[index] || { bot: [], backup: [] };
+      const wrapper = document.createElement("section");
+      wrapper.className = "card";
+      wrapper.dataset.pairIndex = String(index);
+      wrapper.innerHTML = `
+        <h3>Par ${index + 1}</h3>
+        <button type="button" class="delete-pair" data-pair-index="${index}">Eliminar par ${index + 1}</button>
+        <div class="pair-grid">
+          <div>
+            <h4>Bot ${index + 1}</h4>
+            <textarea id="inputBot${index}" placeholder="Pega listado de bot ${index + 1}...">${pair.bot.join("\n")}</textarea>
+          </div>
+          <div>
+            <h4>Backup ${index + 1}</h4>
+            <textarea id="inputBackup${index}" placeholder="Pega listado de backup ${index + 1}...">${pair.backup.join("\n")}</textarea>
+          </div>
+        </div>
+      `;
+      return wrapper;
+    }
+
+    function addPair() {
+      filteredProfiles.pairs.push({ bot: [], backup: [] });
+      pairCounter = filteredProfiles.pairs.length;
+      renderPairs();
+    }
+
+    function removePair(index) {
+      if (index < 0 || index >= filteredProfiles.pairs.length) return;
+      filteredProfiles.pairs.splice(index, 1);
+      pairCounter = filteredProfiles.pairs.length;
+      renderPairs();
+    }
+
+    function renderPairs() {
+      const pairsContainer = document.getElementById("pairsContainer");
+      pairsContainer.innerHTML = "";
+      filteredProfiles.pairs.forEach((_, idx) => {
+        pairsContainer.appendChild(createPairCard(idx));
+      });
+    }
+
+    function filterPair(index, profileType) {
+      const input = document.getElementById(
+        profileType === "bot" ? `inputBot${index}` : `inputBackup${index}`
       );
-      output.textContent = names.join("\n");
+      if (!input || !filteredProfiles.pairs[index]) return;
+      const names = extractNames(input.value);
+      filteredProfiles.pairs[index][profileType] = names;
     }
 
     function filterProfile(profile) {
@@ -278,12 +321,15 @@
       );
       const names = extractNames(inputEl.value);
       filteredProfiles[profile] = names;
-      renderProfileResult(profile, names);
     }
 
     function filterAllProfiles() {
-      ["anunciante", "bot", "backup", "planilla"].forEach((profile) => {
+      ["anunciante", "planilla"].forEach((profile) => {
         filterProfile(profile);
+      });
+      filteredProfiles.pairs.forEach((pair, idx) => {
+        filterPair(idx, "bot");
+        filterPair(idx, "backup");
       });
     }
 
@@ -346,11 +392,17 @@
     function compareProfiles() {
       filterAllProfiles();
 
-      const profilesWithData = getProfilesWithData();
       const compareOutput = document.getElementById("compareOutput");
       const sheetAlertsOutput = document.getElementById("sheetAlertsOutput");
+      const allBots = filteredProfiles.pairs.flatMap((pair) => pair.bot);
+      const allBackups = filteredProfiles.pairs.flatMap((pair) => pair.backup);
+      const hasEnoughData =
+        filteredProfiles.anunciante.length > 0 ||
+        allBots.length > 0 ||
+        allBackups.length > 0 ||
+        filteredProfiles.planilla.length > 0;
 
-      if (profilesWithData.length < 2) {
+      if (!hasEnoughData) {
         compareOutput.textContent = "Debes filtrar al menos 2 perfiles para comparar.";
         sheetAlertsOutput.textContent = "";
         return;
@@ -358,8 +410,8 @@
 
       const profileData = {
         anunciante: buildProfileData(filteredProfiles.anunciante),
-        bot: buildProfileData(filteredProfiles.bot),
-        backup: buildProfileData(filteredProfiles.backup),
+        bot: buildProfileData(allBots),
+        backup: buildProfileData(allBackups),
         planilla: buildProfileData(filteredProfiles.planilla)
       };
       const derived = buildDerivedSets(profileData);
@@ -367,12 +419,11 @@
       const comparedProfiles = getComparedProfiles();
 
       const profilesReady = comparedProfiles.filter(
-        (profile) => filteredProfiles[profile].length > 0
+        (profile) => profileData[profile] && profileData[profile].set.size > 0
       );
 
       if (profilesReady.length < 2) {
-        compareOutput.textContent =
-          "El modo seleccionado necesita al menos 2 perfiles con datos filtrados.";
+        compareOutput.textContent = "Carga al menos 2 perfiles con datos para comparar.";
         sheetAlertsOutput.textContent = "";
         return;
       }
@@ -391,20 +442,55 @@
         compareOutput.textContent = lines.join("\n");
       }
 
-      sheetAlertsOutput.innerHTML = formatWithBoldTitles(buildSheetAlerts(derived, profileData));
+      const pairSummaries = buildPairSummaries();
+      sheetAlertsOutput.innerHTML = formatWithBoldTitles(
+        buildSheetAlerts(derived, profileData, pairSummaries)
+      );
     }
 
     function getComparedProfiles() {
+      const hasBot = filteredProfiles.pairs.some((pair) => pair.bot.length > 0);
+      const hasBackup = filteredProfiles.pairs.some((pair) => pair.backup.length > 0);
       const nonSheetProfiles = ["anunciante", "bot", "backup"].filter(
-        (profile) => filteredProfiles[profile].length > 0
+        (profile) =>
+          (profile === "anunciante" && filteredProfiles.anunciante.length > 0) ||
+          (profile === "bot" && hasBot) ||
+          (profile === "backup" && hasBackup)
       );
       if (nonSheetProfiles.length >= 2) {
         return nonSheetProfiles;
       }
-      return getProfilesWithData().map(([profile]) => profile);
+      return nonSheetProfiles;
     }
 
-    function buildSheetAlerts(derived, profileData) {
+    function buildPairSummaries() {
+      const summaries = [];
+      const anuncianteData = buildProfileData(filteredProfiles.anunciante);
+      filteredProfiles.pairs.forEach((pair, idx) => {
+        const botData = buildProfileData(pair.bot);
+        const backupData = buildProfileData(pair.backup);
+        const common = intersection(botData.set, backupData.set);
+        const extraBot = difference(botData.set, backupData.set);
+        const extraBackup = difference(backupData.set, botData.set);
+        const commonBotAnunciante = intersection(botData.set, anuncianteData.set);
+        const missingInBackupFromBotAnunciante = difference(commonBotAnunciante, backupData.set);
+        summaries.push({
+          index: idx + 1,
+          hasBot: pair.bot.length > 0,
+          hasBackup: pair.backup.length > 0,
+          hasAnunciante: filteredProfiles.anunciante.length > 0,
+          botData,
+          backupData,
+          common,
+          extraBot,
+          extraBackup,
+          missingInBackupFromBotAnunciante
+        });
+      });
+      return summaries;
+    }
+
+    function buildSheetAlerts(derived, profileData, pairSummaries) {
       const {
         anuncianteSet,
         botSet,
@@ -416,6 +502,62 @@
         missingInBackupFromAB
       } = derived;
       const lines = [];
+      lines.push("Comparación por pares Bot/Backup:");
+      if (pairSummaries.length === 0) {
+        lines.push("(ningún par cargado)");
+      } else {
+        pairSummaries.forEach((pair) => {
+          lines.push(`Par ${pair.index}:`);
+          if (!pair.hasBot && !pair.hasBackup) {
+            lines.push("(sin datos)");
+            lines.push("");
+            return;
+          }
+          if (!pair.hasBot) lines.push("Falta cargar bot en este par.");
+          if (!pair.hasBackup) lines.push("Falta cargar backup en este par.");
+          lines.push(`En común: ${pair.common.length}`);
+          lines.push(
+            ...(pair.common.length
+              ? toDisplayList(pair.common, "bot", {
+                  bot: pair.botData,
+                  backup: pair.backupData
+                })
+              : ["(ninguna)"])
+          );
+          lines.push(`Sobran en bot ${pair.index}: ${pair.extraBot.length}`);
+          lines.push(
+            ...(pair.extraBot.length
+              ? toDisplayList(pair.extraBot, "bot", {
+                  bot: pair.botData,
+                  backup: pair.backupData
+                })
+              : ["(ninguna)"])
+          );
+          lines.push(`Sobran en backup ${pair.index}: ${pair.extraBackup.length}`);
+          lines.push(
+            ...(pair.extraBackup.length
+              ? toDisplayList(pair.extraBackup, "backup", {
+                  bot: pair.botData,
+                  backup: pair.backupData
+                })
+              : ["(ninguna)"])
+          );
+          lines.push(`Falta agregar en backup ${pair.index} (en común bot ${pair.index} + anunciante): ${pair.missingInBackupFromBotAnunciante.length}`);
+          lines.push(
+            ...(pair.hasAnunciante
+              ? pair.missingInBackupFromBotAnunciante.length
+                ? toDisplayList(pair.missingInBackupFromBotAnunciante, "bot", {
+                    anunciante: buildProfileData(filteredProfiles.anunciante),
+                    bot: pair.botData,
+                    backup: pair.backupData
+                  })
+                : ["(ninguna)"]
+              : ["(carga anunciante para este control)"])
+          );
+          lines.push("");
+        });
+      }
+      lines.push("Resumen global:");
       const loadedPrimaryProfiles = ["anunciante", "bot", "backup"].filter(
         (profile) => profileData[profile].set.size > 0
       );
@@ -683,12 +825,16 @@
 
     function formatWithBoldTitles(text) {
       const titlePrefixes = [
+        "Comparación por pares Bot/Backup",
+        "Par ",
+        "Resumen global",
         "Prioridad alta",
         "Prioridad media",
         "Acción recomendada",
         "Control entre perfiles",
         "En común",
         "Faltan en ",
+        "Falta agregar en backup ",
         "Sobran estas páginas en ",
         "Está en planilla y en solo 1 perfil",
         "Solo en ",
@@ -730,11 +876,16 @@
       URL.revokeObjectURL(url);
     }
 
-    document.querySelectorAll(".filter-profile").forEach((button) => {
-      button.addEventListener("click", () => {
-        filterProfile(button.dataset.profile);
-      });
+    document.getElementById("addPairBtn").addEventListener("click", addPair);
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.classList.contains("delete-pair")) {
+        const pairIndex = Number(target.dataset.pairIndex);
+        if (!Number.isNaN(pairIndex)) removePair(pairIndex);
+      }
     });
+    addPair();
 
     document.getElementById("compareBtn").addEventListener("click", compareProfiles);
     document.getElementById("copyReportBtn").addEventListener("click", copyReport);
