@@ -355,37 +355,120 @@
       return [...a].filter((key) => !b.has(key));
     }
 
-    function union(a, b) {
-      return new Set([...a, ...b]);
+    function unionCounts(...countMaps) {
+      const result = new Map();
+      for (const countMap of countMaps) {
+        for (const [key, count] of countMap.entries()) {
+          result.set(key, Math.max(result.get(key) || 0, count));
+        }
+      }
+      return result;
+    }
+
+
+    function countIntersection(a, b) {
+      const result = new Map();
+      for (const [key, count] of a.entries()) {
+        if (b.has(key)) {
+          result.set(key, Math.min(count, b.get(key)));
+        }
+      }
+      return result;
+    }
+
+    function countIntersectionThree(a, b, c) {
+      const result = new Map();
+      for (const [key, count] of b.entries()) {  // Order from bot (b)
+        if (a.has(key) && c.has(key)) {
+          result.set(key, Math.min(count, a.get(key), c.get(key)));
+        }
+      }
+      return result;
+    }
+
+    function countDifference(source, target) {
+      const result = new Map();
+      for (const [key, count] of source.entries()) {
+        const diff = count - (target.get(key) || 0);
+        if (diff > 0) {
+          result.set(key, diff);
+        }
+      }
+      return result;
+    }
+
+    function sumCounts(countMap) {
+      return [...countMap.values()].reduce((sum, value) => sum + value, 0);
+    }
+
+    function formatCountMap(countMap, preferredProfile, profileData) {
+      return [...countMap.entries()].map(([key, count]) => {
+        const display = getDisplayName(preferredProfile, key, profileData);
+        return count > 1 ? `${display} (${count})` : display;
+      });
+    }
+
+    function getKeysPresentInAtLeastTwo(profileData) {
+      const counts = new Map();
+      ["anunciante", "bot", "backup"].forEach((profile) => {
+        profileData[profile].counts.forEach((_, key) => {
+          counts.set(key, (counts.get(key) || 0) + 1);
+        });
+      });
+      return [...counts.entries()]
+        .filter(([, count]) => count >= 2)
+        .map(([key]) => key);
     }
 
     function toDisplayList(keys, preferredProfile, profileData) {
+      if (keys instanceof Map) {
+        return formatCountMap(keys, preferredProfile, profileData);
+      }
       return keys.map((key) => getDisplayName(preferredProfile, key, profileData));
     }
 
-    function buildDerivedSets(profileData) {
+    function buildDerivedSets(profileData, filteredProfiles) {
       const anuncianteSet = profileData.anunciante.set;
       const botSet = profileData.bot.set;
       const backupSet = profileData.backup.set;
       const planillaSet = profileData.planilla.set;
-      const commonAB = new Set(intersection(anuncianteSet, botSet));
-      const commonABC = new Set(intersection(commonAB, backupSet));
-      const commonBotBackup = new Set(intersection(botSet, backupSet));
-      const commonAnuncianteBackup = new Set(intersection(anuncianteSet, backupSet));
+      const commonABCounts = countIntersection(profileData.anunciante.counts, profileData.bot.counts);
+      const commonABCCounts = countIntersectionThree(
+        profileData.anunciante.counts,
+        profileData.bot.counts,
+        profileData.backup.counts
+      );
+      const commonBotBackupCounts = countIntersection(profileData.bot.counts, profileData.backup.counts);
+      const commonAnuncianteBackupCounts = countIntersection(profileData.anunciante.counts, profileData.backup.counts);
+      const repeatedInFirstThree = new Set(getKeysPresentInAtLeastTwo(profileData));
+      const extraInBotFromAB = countDifference(profileData.bot.counts, commonABCounts);
+      const extraInAnuncianteFromAB = countDifference(profileData.anunciante.counts, commonABCounts);
+      const extraInBackupFromABC = countDifference(profileData.backup.counts, commonABCCounts);
+
+      // No need to sort, will be added in pair order
+      const sortedCommonABCCounts = commonABCCounts;
 
       return {
         anuncianteSet,
         botSet,
         backupSet,
         planillaSet,
-        commonAB,
-        commonABC,
-        commonBotBackup,
-        commonAnuncianteBackup,
-        missingInSheetFromABC: new Set(difference(commonABC, planillaSet)),
-        missingInSheetFromAB: new Set(difference(commonAB, planillaSet)),
-        missingInBackupFromAB: new Set(difference(commonAB, backupSet)),
-        commonAllForCleanup: commonABC
+        commonAB: new Set(commonABCounts.keys()),
+        commonABCounts,
+        commonABC: new Set(commonABCCounts.keys()),
+        commonABCCounts,
+        commonBotBackup: new Set(commonBotBackupCounts.keys()),
+        commonBotBackupCounts,
+        commonAnuncianteBackup: new Set(commonAnuncianteBackupCounts.keys()),
+        commonAnuncianteBackupCounts,
+        repeatedInFirstThree,
+        extraInBotFromAB,
+        extraInAnuncianteFromAB,
+        extraInBackupFromABC,
+        missingInSheetFromABC: countDifference(commonABCCounts, profileData.planilla.counts),
+        missingInSheetFromAB: countDifference(commonABCounts, profileData.planilla.counts),
+        missingInBackupFromAB: countDifference(commonABCounts, profileData.backup.counts),
+        commonAllForCleanup: new Set(commonABCCounts.keys())
       };
     }
 
@@ -414,33 +497,161 @@
         backup: buildProfileData(allBackups),
         planilla: buildProfileData(filteredProfiles.planilla)
       };
-      const derived = buildDerivedSets(profileData);
+      const derived = buildDerivedSets(profileData, filteredProfiles);
+      const profileLabels = {
+        anunciante: "anunciante",
+        bot: "bot",
+        backup: "backup"
+      };
 
-      const comparedProfiles = getComparedProfiles();
-
-      const profilesReady = comparedProfiles.filter(
-        (profile) => profileData[profile] && profileData[profile].set.size > 0
+      const loadedPrimaryProfiles = ["anunciante", "bot", "backup"].filter(
+        (profile) => profileData[profile].set.size > 0
       );
-
-      if (profilesReady.length < 2) {
+      if (loadedPrimaryProfiles.length < 2) {
         compareOutput.textContent = "Carga al menos 2 perfiles con datos para comparar.";
         sheetAlertsOutput.textContent = "";
         return;
       }
 
-      const baseSet = profileData[profilesReady[0]].set;
-      const commonKeys = [...baseSet].filter((key) =>
-        profilesReady.every((profile) => profileData[profile].set.has(key))
-      );
+      const compareLines = [];
+      compareLines.push("1) Comparación entre los 3 perfiles (Anunciante, Bot, Backup):");
+      compareLines.push(`En común en los 3 perfiles: ${sumCounts(derived.commonABCCounts)}`);
+      // Add pages in order of pairs, without duplicates
+      const added = new Set();
+      const commonPages = [];
+      filteredProfiles.pairs.forEach((pair) => {
+        const botData = buildProfileData(pair.bot);
+        const backupData = buildProfileData(pair.backup);
+        const commonInPair = countIntersectionThree(profileData.anunciante.counts, botData.counts, backupData.counts);
+        for (const [key, count] of commonInPair) {
+          if (!added.has(key)) {
+            added.add(key);
+            const display = getDisplayName("anunciante", key, profileData);
+            commonPages.push(count > 1 ? `${display} (${count})` : display);
+          }
+        }
+      });
+      compareLines.push(...commonPages);
+      compareLines.push("");
 
-      if (commonKeys.length === 0) {
-        compareOutput.textContent = "No hay nombres en común para el modo seleccionado.";
-      } else {
-        const lines = commonKeys.map((key) =>
-          getDisplayName(profilesReady[0], key, profileData)
+      compareLines.push("2) Comparación entre Anunciante y cada Bot:");
+      filteredProfiles.pairs.forEach((pair, idx) => {
+        if (pair.bot.length === 0) return;
+        const botData = buildProfileData(pair.bot);
+        const common = countIntersection(profileData.anunciante.counts, botData.counts);
+        compareLines.push(`Bot ${idx + 1}: Repetidas en Anunciante + Bot ${idx + 1}: ${sumCounts(common)}`);
+        compareLines.push(
+          ...(sumCounts(common)
+            ? formatCountMap(common, "anunciante", { anunciante: profileData.anunciante, bot: botData })
+            : ["(ninguna)"])
         );
-        compareOutput.textContent = lines.join("\n");
+        compareLines.push("");
+      });
+
+      compareLines.push("3) Faltan en cada Backup respecto a Anunciante + su Bot:");
+      filteredProfiles.pairs.forEach((pair, idx) => {
+        if (pair.bot.length === 0 || pair.backup.length === 0) return;
+        const botData = buildProfileData(pair.bot);
+        const backupData = buildProfileData(pair.backup);
+        const commonAB = countIntersection(profileData.anunciante.counts, botData.counts);
+        const missingInBackup = countDifference(commonAB, backupData.counts);
+        compareLines.push(`Backup ${idx + 1}: Faltan en Backup ${idx + 1}: ${sumCounts(missingInBackup)}`);
+        compareLines.push(
+          ...(sumCounts(missingInBackup)
+            ? formatCountMap(missingInBackup, "anunciante", { anunciante: profileData.anunciante, bot: botData, backup: backupData })
+            : ["(ninguna)"])
+        );
+        compareLines.push("");
+      });
+
+      compareLines.push("4) Sobran en cada Backup respecto a Anunciante + su Bot:");
+      filteredProfiles.pairs.forEach((pair, idx) => {
+        if (pair.bot.length === 0 || pair.backup.length === 0) return;
+        const botData = buildProfileData(pair.bot);
+        const backupData = buildProfileData(pair.backup);
+        const commonAB = countIntersection(profileData.anunciante.counts, botData.counts);
+        const commonABC = countIntersectionThree(profileData.anunciante.counts, botData.counts, backupData.counts);
+        const extraInBackup = countDifference(backupData.counts, commonABC);
+        compareLines.push(`Backup ${idx + 1}: Sobran en Backup ${idx + 1}: ${sumCounts(extraInBackup)}`);
+        compareLines.push(
+          ...(sumCounts(extraInBackup)
+            ? formatCountMap(extraInBackup, "backup", { anunciante: profileData.anunciante, bot: botData, backup: backupData })
+            : ["(ninguna)"])
+        );
+        compareLines.push("");
+      });
+
+      compareLines.push("5) Páginas que sobran en Anunciante (no están en ningún Bot ni Backup):");
+      const extraInAnunciante = countDifference(profileData.anunciante.counts, unionCounts(profileData.bot.counts, profileData.backup.counts));
+      compareLines.push(`${sumCounts(extraInAnunciante)}`);
+      compareLines.push(
+        ...(sumCounts(extraInAnunciante)
+          ? formatCountMap(extraInAnunciante, "anunciante", profileData)
+          : ["(ninguna)"])
+      );
+      compareLines.push("");
+
+      compareLines.push("6) Páginas que sobran en Bots (no están en Anunciante ni en sus Backups):");
+      filteredProfiles.pairs.forEach((pair, idx) => {
+        if (pair.bot.length === 0) return;
+        const botData = buildProfileData(pair.bot);
+        const backupData = buildProfileData(pair.backup);
+        const extraInBot = countDifference(botData.counts, unionCounts(profileData.anunciante.counts, backupData.counts));
+        compareLines.push(`Bot ${idx + 1}: Sobran en Bot ${idx + 1}: ${sumCounts(extraInBot)}`);
+        compareLines.push(
+          ...(sumCounts(extraInBot)
+            ? formatCountMap(extraInBot, "bot", { anunciante: profileData.anunciante, bot: botData, backup: backupData })
+            : ["(ninguna)"])
+        );
+        compareLines.push("");
+      });
+
+      compareLines.push("7) Páginas que sobran en Backups (no están en Anunciante ni en sus Bots):");
+      filteredProfiles.pairs.forEach((pair, idx) => {
+        if (pair.backup.length === 0) return;
+        const botData = buildProfileData(pair.bot);
+        const backupData = buildProfileData(pair.backup);
+        const extraInBackup = countDifference(backupData.counts, unionCounts(profileData.anunciante.counts, botData.counts));
+        compareLines.push(`Backup ${idx + 1}: Sobran en Backup ${idx + 1}: ${sumCounts(extraInBackup)}`);
+        compareLines.push(
+          ...(sumCounts(extraInBackup)
+            ? formatCountMap(extraInBackup, "backup", { anunciante: profileData.anunciante, bot: botData, backup: backupData })
+            : ["(ninguna)"])
+        );
+        compareLines.push("");
+      });
+
+      if (profileData.planilla.set.size > 0) {
+        compareLines.push("8) Verificación con Planilla:");
+        compareLines.push(
+          `Faltan en planilla (en los 3 perfiles): ${sumCounts(derived.missingInSheetFromABC)}`
+        );
+        compareLines.push(
+          ...(sumCounts(derived.missingInSheetFromABC)
+            ? formatCountMap(derived.missingInSheetFromABC, "anunciante", profileData)
+            : ["(ninguna)"])
+        );
+        compareLines.push("");
+        compareLines.push(
+          `Faltan en planilla (en Anunciante + Bot): ${sumCounts(derived.missingInSheetFromAB)}`
+        );
+        compareLines.push(
+          ...(sumCounts(derived.missingInSheetFromAB)
+            ? formatCountMap(derived.missingInSheetFromAB, "anunciante", profileData)
+            : ["(ninguna)"])
+        );
+        compareLines.push("");
       }
+
+      compareOutput.innerHTML = compareLines.map(line => {
+        const titlePrefixes = [
+          "1) ", "2) ", "3) ", "4) ", "5) ", "6) ", "7) ", "8) ",
+          "Bot ", "Backup ", "Sobran en ", "Faltan en ", "Repetidas en ",
+          "Páginas que sobran en ", "En común en los 3 perfiles: "
+        ];
+        const isTitle = titlePrefixes.some(prefix => line.startsWith(prefix));
+        return isTitle ? `<strong>${line}</strong>` : line;
+      }).join("<br>");
 
       const pairSummaries = buildPairSummaries();
       sheetAlertsOutput.innerHTML = formatWithBoldTitles(
@@ -469,11 +680,11 @@
       filteredProfiles.pairs.forEach((pair, idx) => {
         const botData = buildProfileData(pair.bot);
         const backupData = buildProfileData(pair.backup);
-        const common = intersection(botData.set, backupData.set);
-        const extraBot = difference(botData.set, backupData.set);
-        const extraBackup = difference(backupData.set, botData.set);
-        const commonBotAnunciante = intersection(botData.set, anuncianteData.set);
-        const missingInBackupFromBotAnunciante = difference(commonBotAnunciante, backupData.set);
+        const common = countIntersection(botData.counts, backupData.counts);
+        const extraBot = countDifference(botData.counts, backupData.counts);
+        const extraBackup = countDifference(backupData.counts, botData.counts);
+        const commonBotAnunciante = countIntersection(botData.counts, anuncianteData.counts);
+        const missingInBackupFromBotAnunciante = countDifference(commonBotAnunciante, backupData.counts);
         summaries.push({
           index: idx + 1,
           hasBot: pair.bot.length > 0,
@@ -515,37 +726,37 @@
           }
           if (!pair.hasBot) lines.push("Falta cargar bot en este par.");
           if (!pair.hasBackup) lines.push("Falta cargar backup en este par.");
-          lines.push(`En común: ${pair.common.length}`);
+          lines.push(`En común: ${sumCounts(pair.common)}`);
           lines.push(
-            ...(pair.common.length
+            ...(sumCounts(pair.common)
               ? toDisplayList(pair.common, "bot", {
                   bot: pair.botData,
                   backup: pair.backupData
                 })
               : ["(ninguna)"])
           );
-          lines.push(`Sobran en bot ${pair.index}: ${pair.extraBot.length}`);
+          lines.push(`Sobran en bot ${pair.index}: ${sumCounts(pair.extraBot)}`);
           lines.push(
-            ...(pair.extraBot.length
+            ...(sumCounts(pair.extraBot)
               ? toDisplayList(pair.extraBot, "bot", {
                   bot: pair.botData,
                   backup: pair.backupData
                 })
               : ["(ninguna)"])
           );
-          lines.push(`Sobran en backup ${pair.index}: ${pair.extraBackup.length}`);
+          lines.push(`Sobran en backup ${pair.index}: ${sumCounts(pair.extraBackup)}`);
           lines.push(
-            ...(pair.extraBackup.length
+            ...(sumCounts(pair.extraBackup)
               ? toDisplayList(pair.extraBackup, "backup", {
                   bot: pair.botData,
                   backup: pair.backupData
                 })
               : ["(ninguna)"])
           );
-          lines.push(`Falta agregar en backup ${pair.index} (en común bot ${pair.index} + anunciante): ${pair.missingInBackupFromBotAnunciante.length}`);
+          lines.push(`Falta agregar en backup ${pair.index} (en común bot ${pair.index} + anunciante): ${sumCounts(pair.missingInBackupFromBotAnunciante)}`);
           lines.push(
             ...(pair.hasAnunciante
-              ? pair.missingInBackupFromBotAnunciante.length
+              ? sumCounts(pair.missingInBackupFromBotAnunciante)
                 ? toDisplayList(pair.missingInBackupFromBotAnunciante, "bot", {
                     anunciante: buildProfileData(filteredProfiles.anunciante),
                     bot: pair.botData,
@@ -571,22 +782,20 @@
 
       const addMissingBetweenTwoProfiles = () => {
         const [p1, p2] = loadedPrimaryProfiles;
-        const p1Set = profileData[p1].set;
-        const p2Set = profileData[p2].set;
-        const missingInP1 = difference(p2Set, p1Set);
-        const missingInP2 = difference(p1Set, p2Set);
+        const missingInP1 = countDifference(profileData[p1].counts, profileData[p2].counts);
+        const missingInP2 = countDifference(profileData[p2].counts, profileData[p1].counts);
 
-        lines.push(`Sobran en ${profileLabels[p2]} respecto a ${profileLabels[p1]}:`);
+        lines.push(`Sobran en ${profileLabels[p1]} respecto a ${profileLabels[p2]}: ${sumCounts(missingInP1)}`);
         lines.push(
-          ...(missingInP1.length
-            ? toDisplayList(missingInP1, p2, profileData).map((item) => item)
+          ...(sumCounts(missingInP1)
+            ? formatCountMap(missingInP1, p1, profileData)
             : ["(ninguna)"])
         );
         lines.push("");
-        lines.push(`Sobran en ${profileLabels[p1]} respecto a ${profileLabels[p2]}:`);
+        lines.push(`Sobran en ${profileLabels[p2]} respecto a ${profileLabels[p1]}: ${sumCounts(missingInP2)}`);
         lines.push(
-          ...(missingInP2.length
-            ? toDisplayList(missingInP2, p1, profileData).map((item) => item)
+          ...(sumCounts(missingInP2)
+            ? formatCountMap(missingInP2, p2, profileData)
             : ["(ninguna)"])
         );
       };
@@ -600,21 +809,24 @@
           addMissingBetweenTwoProfiles();
         } else {
           lines.push("Control entre perfiles (sin planilla):");
-          lines.push(`En común anunciante + bot: ${derived.commonAB.size}`);
+          lines.push(`Repetidas en los 3 perfiles: ${sumCounts(derived.commonABCCounts)}`);
           lines.push(
-            ...(derived.commonAB.size
-              ? toDisplayList([...derived.commonAB], "anunciante", profileData).map(
-                  (item) => item
-                )
+            ...(sumCounts(derived.commonABCCounts)
+              ? formatCountMap(derived.commonABCCounts, "anunciante", profileData)
+              : ["(ninguna)"])
+          );
+          lines.push("");
+          lines.push(`Repetidas en anunciante + bot: ${sumCounts(derived.commonABCounts)}`);
+          lines.push(
+            ...(sumCounts(derived.commonABCounts)
+              ? formatCountMap(derived.commonABCounts, "anunciante", profileData)
               : ["(ninguna)"])
           );
           lines.push("");
           lines.push("Faltan en backup respecto a anunciante + bot:");
           lines.push(
-            ...(missingInBackupFromAB.size
-              ? toDisplayList([...missingInBackupFromAB], "anunciante", profileData).map(
-                  (item) => item
-                )
+            ...(sumCounts(derived.missingInBackupFromAB)
+              ? formatCountMap(derived.missingInBackupFromAB, "anunciante", profileData)
               : ["(ninguna)"])
           );
         }
@@ -622,15 +834,13 @@
         if (hasThreeProfiles) {
           lines.push("Prioridad alta - faltan en planilla (presentes en los 3 perfiles):");
           lines.push(
-            ...(missingInSheetFromABC.size
-            ? toDisplayList([...missingInSheetFromABC], "anunciante", profileData).map(
-                (item) => item
-              )
-            : ["(ninguna)"])
+            ...(sumCounts(missingInSheetFromABC)
+              ? formatCountMap(missingInSheetFromABC, "anunciante", profileData)
+              : ["(ninguna)"])
           );
           lines.push("");
           lines.push("Prioridad media - está en anunciante y bot, falta validar en planilla y/o backup:");
-          const mediumKeys = [...missingInSheetFromAB];
+          const mediumKeys = [...missingInSheetFromAB.keys()];
           if (!mediumKeys.length && !missingInBackupFromAB.size) {
             lines.push("(ninguna)");
           } else {
@@ -703,39 +913,33 @@
       }
       if (hasThreeProfiles) {
         lines.push("");
-        const sobraSoloEnAnunciante = difference(anuncianteSet, union(botSet, backupSet));
-        const sobraSoloEnBot = difference(botSet, union(anuncianteSet, backupSet));
-        const sobraSoloEnBackup = difference(backupSet, union(anuncianteSet, botSet));
+        const extraInAnunciante = countDifference(profileData.anunciante.counts, unionCounts(profileData.bot.counts, profileData.backup.counts));
+        const extraInBot = countDifference(profileData.bot.counts, unionCounts(profileData.anunciante.counts, profileData.backup.counts));
+        const extraInBackup = countDifference(profileData.backup.counts, unionCounts(profileData.anunciante.counts, profileData.bot.counts));
 
-        lines.push(`Sobran estas páginas en anunciante: ${sobraSoloEnAnunciante.length}`);
+        lines.push(`Sobran estas páginas en anunciante: ${sumCounts(extraInAnunciante)}`);
         lines.push(
           ...(
-            sobraSoloEnAnunciante.length
-              ? toDisplayList(sobraSoloEnAnunciante, "anunciante", profileData).map(
-                  (item) => item
-                )
+            sumCounts(extraInAnunciante)
+              ? formatCountMap(extraInAnunciante, "anunciante", profileData)
               : ["(ninguna)"]
           )
         );
         lines.push("");
-        lines.push(`Sobran estas páginas en bot: ${sobraSoloEnBot.length}`);
+        lines.push(`Sobran estas páginas en bot: ${sumCounts(extraInBot)}`);
         lines.push(
           ...(
-            sobraSoloEnBot.length
-              ? toDisplayList(sobraSoloEnBot, "bot", profileData).map(
-                  (item) => item
-                )
+            sumCounts(extraInBot)
+              ? formatCountMap(extraInBot, "bot", profileData)
               : ["(ninguna)"]
           )
         );
         lines.push("");
-        lines.push(`Sobran estas páginas en backup: ${sobraSoloEnBackup.length}`);
+        lines.push(`Sobran estas páginas en backup: ${sumCounts(extraInBackup)}`);
         lines.push(
           ...(
-            sobraSoloEnBackup.length
-              ? toDisplayList(sobraSoloEnBackup, "backup", profileData).map(
-                  (item) => item
-                )
+            sumCounts(extraInBackup)
+              ? formatCountMap(extraInBackup, "backup", profileData)
               : ["(ninguna)"]
           )
         );
